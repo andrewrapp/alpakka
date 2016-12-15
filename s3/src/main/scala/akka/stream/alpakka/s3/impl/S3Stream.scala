@@ -10,7 +10,9 @@ import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.event.Logging
 import akka.http.scaladsl.Http
-import akka.http.scaladsl.model.{ ContentType, ContentTypes, HttpRequest, HttpResponse, ResponseEntity, Uri }
+import akka.http.scaladsl.Http.HostConnectionPool
+import akka.http.scaladsl.model._
+import akka.http.scaladsl.settings.ConnectionPoolSettings
 import akka.http.scaladsl.unmarshalling.{ Unmarshal, Unmarshaller }
 import akka.stream.{ Attributes, Materializer }
 import akka.stream.alpakka.s3.{ DiskBufferType, MemoryBufferType, S3Settings }
@@ -21,9 +23,11 @@ import akka.util.ByteString
 
 import scala.collection.immutable.Seq
 import scala.concurrent.{ ExecutionContext, Future }
-import scala.util.{ Failure, Success }
+import scala.util.{ Failure, Success, Try }
 
 final case class S3Location(bucket: String, key: String)
+
+final case class S3Bucket(bucket: String)
 
 final case class MultipartUpload(s3Location: S3Location, uploadId: String)
 
@@ -52,9 +56,25 @@ private[alpakka] final class S3Stream(credentials: AWSCredentials, region: Strin
                                                                       mat: Materializer) =
     this(credentials, region, S3Settings(system))
 
-  def download(s3Location: S3Location): Source[ByteString, NotUsed] = {
+  def download(s3Location: S3Location, region: String): Source[ByteString, NotUsed] = {
     import mat.executionContext
-    Source.fromFuture(signAndGet(HttpRequests.getRequest(s3Location)).map(_.dataBytes)).flatMapConcat(identity)
+
+    Source
+      .fromFuture(signAndGet(HttpRequests.download(s3Location, region)).map { entity =>
+        entity.withoutSizeLimit().dataBytes
+      })
+      .flatMapConcat(identity)
+  }
+
+  def listBucket(s3Bucket: S3Bucket,
+                 region: String,
+                 prefix: Option[String],
+                 maxKeys: Option[Int],
+                 marker: Option[String]): Source[ByteString, NotUsed] = {
+    import mat.executionContext
+    Source
+      .fromFuture(signAndGet(HttpRequests.listBucket(s3Bucket, region, prefix, maxKeys, marker)).map(_.dataBytes))
+      .flatMapConcat(identity)
   }
 
   /**
@@ -197,8 +217,18 @@ private[alpakka] final class S3Stream(credentials: AWSCredentials, region: Strin
     signAndGet(request).flatMap(entity => Unmarshal(entity).to[T])
   }
 
+//  val poolClientFlow: Flow[(HttpRequest, Int), (Try[HttpResponse], Int), HostConnectionPool] = Http().cachedHostConnectionPool[Int]("s3-us-west-1.amazonaws.com", 443)
+
   private def signAndGet(request: HttpRequest): Future[ResponseEntity] = {
     import mat.executionContext
+
+    // connection pool experiment
+//    Signer.signedRequest(request, signingKey).flatMap{ req =>
+//      Source.single(req -> 1).via(Http().superPool()).runWith(Sink.head)
+//    }.flatMap { (resp: (Try[HttpResponse], Int)) =>
+//      entityForSuccess(resp._1.get)
+//    }
+
     for (req <- Signer.signedRequest(request, signingKey);
          res <- Http().singleRequest(req);
          t <- entityForSuccess(res)) yield t
