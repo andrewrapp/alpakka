@@ -30,7 +30,7 @@ final class S3Client(credentials: AWSCredentials, region: String, system: ActorS
   private val impl = new S3Stream(credentials, region)(system, mat)
 
   def download(bucket: String, key: String): Source[ByteString, NotUsed] =
-    impl.download(S3Location(bucket, key), region).asJava
+    impl.download(S3Location(bucket, key), region, None).asJava
 
   def multipartUpload(bucket: String,
                       key: String,

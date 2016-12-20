@@ -18,6 +18,7 @@ import akka.stream.{ Attributes, Materializer }
 import akka.stream.alpakka.s3.{ DiskBufferType, MemoryBufferType, S3Settings }
 import akka.stream.alpakka.s3.acl.CannedAcl
 import akka.stream.alpakka.s3.auth.{ AWSCredentials, CredentialScope, Signer, SigningKey }
+import akka.stream.alpakka.s3.scaladsl.ProxyTo
 import akka.stream.scaladsl.{ Flow, Keep, Sink, Source }
 import akka.util.ByteString
 
@@ -56,11 +57,11 @@ private[alpakka] final class S3Stream(credentials: AWSCredentials, region: Strin
                                                                       mat: Materializer) =
     this(credentials, region, S3Settings(system))
 
-  def download(s3Location: S3Location, region: String): Source[ByteString, NotUsed] = {
+  def download(s3Location: S3Location, region: String, proxyTo: Option[ProxyTo]): Source[ByteString, NotUsed] = {
     import mat.executionContext
 
     Source
-      .fromFuture(signAndGet(HttpRequests.download(s3Location, region)).map { entity =>
+      .fromFuture(signAndGet(HttpRequests.download(s3Location, region, proxyTo)).map { entity =>
         entity.withoutSizeLimit().dataBytes
       })
       .flatMapConcat(identity)
@@ -68,12 +69,14 @@ private[alpakka] final class S3Stream(credentials: AWSCredentials, region: Strin
 
   def listBucket(s3Bucket: S3Bucket,
                  region: String,
+                 proxyTo: Option[ProxyTo],
                  prefix: Option[String],
                  maxKeys: Option[Int],
                  marker: Option[String]): Source[ByteString, NotUsed] = {
     import mat.executionContext
     Source
-      .fromFuture(signAndGet(HttpRequests.listBucket(s3Bucket, region, prefix, maxKeys, marker)).map(_.dataBytes))
+      .fromFuture(signAndGet(HttpRequests.listBucket(s3Bucket, region, proxyTo, prefix, maxKeys, marker))
+          .map(_.dataBytes))
       .flatMapConcat(identity)
   }
 

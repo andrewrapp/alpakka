@@ -27,18 +27,22 @@ object S3Client {
   val MinChunkSize = 5242880
 }
 
-final class S3Client(credentials: AWSCredentials, region: String)(implicit system: ActorSystem, mat: Materializer) {
+case class ProxyTo(host: String, port: Int)
+
+final class S3Client(credentials: AWSCredentials, region: String, proxyTo: Option[ProxyTo])(
+    implicit system: ActorSystem,
+    mat: Materializer) {
   import S3Client._
   private val impl = new S3Stream(credentials, region)
 
   def download(bucket: String, key: String): Source[ByteString, NotUsed] =
-    impl.download(S3Location(bucket, key), region)
+    impl.download(S3Location(bucket, key), region, proxyTo)
 
   def listBucket(bucket: String,
                  prefix: Option[String],
                  maxKeys: Option[Int],
                  marker: Option[String]): Source[ByteString, NotUsed] =
-    impl.listBucket(S3Bucket(bucket), region, prefix, maxKeys, marker)
+    impl.listBucket(S3Bucket(bucket), region, proxyTo, prefix, maxKeys, marker)
 
   def multipartUpload(bucket: String,
                       key: String,

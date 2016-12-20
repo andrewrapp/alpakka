@@ -14,6 +14,7 @@ import akka.stream.alpakka.s3.acl.CannedAcl
 import akka.stream.scaladsl.Source
 import akka.http.scaladsl.model.RequestEntity
 import akka.http.scaladsl.model.RequestEntity
+import akka.stream.alpakka.s3.scaladsl.ProxyTo
 
 import scala.collection.immutable.Iterable
 import scala.util.Random
@@ -37,18 +38,22 @@ private[alpakka] object HttpRequests {
 
   def download(s3Location: S3Location,
                region: String,
+               proxyTo: Option[ProxyTo],
                method: HttpMethod = HttpMethods.GET,
                uriFn: (Uri => Uri) = identity): HttpRequest =
-    HttpRequest(method).withHeaders(Host(requestHost(region))).withUri(uriFn(requestUri(s3Location, region)))
+    HttpRequest(method)
+      .withHeaders(Host(requestHost(region)))
+      .withUri(uriFn(requestUri(s"/${s3Location.bucket}/${s3Location.key}", region, proxyTo)))
 
   def listBucket(s3Bucket: S3Bucket,
                  region: String,
+                 proxyTo: Option[ProxyTo],
                  prefix: Option[String],
                  maxKeys: Option[Int],
                  marker: Option[String]): HttpRequest =
     HttpRequest(HttpMethods.GET)
       .withHeaders(Host(requestHost(region)))
-      .withUri(listBucketUri(s3Bucket, region, prefix, maxKeys, marker))
+      .withUri(listBucketUri(s3Bucket, region, proxyTo, prefix, maxKeys, marker))
 
   def uploadPartRequest(upload: MultipartUpload,
                         partNumber: Int,
@@ -85,7 +90,6 @@ private[alpakka] object HttpRequests {
 
   //def requestHost(s3Location: S3Location): Uri.Host = Uri.Host(s"${s3Location.bucket}.s3.amazonaws.com")
 
-  // FIXME region hardcoded
   def requestHost(region: String): Uri.Host = Uri.Host(s"s3-${region}.amazonaws.com")
 
   def requestHost(): Uri.Host = Uri.Host("s3.amazonaws.com")
@@ -93,38 +97,40 @@ private[alpakka] object HttpRequests {
   def requestUri(s3Location: S3Location): Uri =
     Uri(s"/${s3Location.bucket}/${s3Location.key}").withHost(requestHost()).withScheme("https")
 
-  def requestUri(s3Location: S3Location, region: String): Uri =
-    Uri(s"/${s3Location.bucket}/${s3Location.key}").withHost(requestHost(region)).withScheme("https")
-
-  def downloadUri(s3Bucket: S3Bucket, region: String): Uri =
-    Uri(s"/${s3Bucket.bucket}").withHost(requestHost(region)).withScheme("https")
+  def requestUri(path: String, region: String, proxyTo: Option[ProxyTo]): Uri =
+    proxyTo match {
+      case Some(proxyTo) =>
+        Uri(path).withHost(proxyTo.host).withPort(proxyTo.port).withScheme("http")
+      case _ =>
+        Uri(path)
+        // NOTE: not using bucket host addressing due to SSL certificate issue with periods in bucket names
+          .withHost(requestHost(region))
+          .withScheme("https")
+    }
 
   def listBucketUri(s3Bucket: S3Bucket,
                     region: String,
+                    proxyTo: Option[ProxyTo],
                     prefix: Option[String],
                     maxKeys: Option[Int],
                     marker: Option[String]): Uri = {
-    //val prefixParam = prefix.map(p => s"prefix=$p").getOrElse("")
 
     val prefixQuery: Map[String, String] = prefix match {
       case Some(p) => Map("prefix" -> p)
-      case None => Map[String, String]()
+      case None => Map[String, String]().empty
     }
 
     val maxKeysQuery: Map[String, String] = maxKeys match {
       case Some(m) => Map("max-keys" -> m.toString)
-      case _ => Map[String, String]()
+      case _ => Map[String, String]().empty
     }
 
     val markerQuery: Map[String, String] = marker match {
       case Some(m) => Map("marker" -> m)
-      case _ => Map[String, String]()
+      case _ => Map[String, String]().empty
     }
 
-    // NOTE: not using bucket host addressing due to issue with periods in bucket names. need to disable host verification
-    Uri(s"/${s3Bucket.bucket}")
-      .withHost(requestHost(region))
-      .withScheme("https")
+    requestUri(s"/${s3Bucket.bucket}", region, proxyTo)
       .withQuery(Uri.Query(prefixQuery ++ markerQuery ++ maxKeysQuery))
   }
 }

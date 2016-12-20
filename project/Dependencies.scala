@@ -18,7 +18,6 @@ object Dependencies {
   val AkkaHttpVersion = "10.0.0"
 
   val S3 = Seq(
-    version := "99.0", // local publish a patched version
     libraryDependencies ++= Seq(
       "com.typesafe.akka" %% "akka-http"     % AkkaHttpVersion,
       "com.typesafe.akka" %% "akka-http-xml" % AkkaHttpVersion,
