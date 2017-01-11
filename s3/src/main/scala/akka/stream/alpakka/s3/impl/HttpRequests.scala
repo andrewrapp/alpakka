@@ -24,7 +24,7 @@ private[alpakka] object HttpRequests {
   def s3Request(s3Location: S3Location,
                 method: HttpMethod = HttpMethods.GET,
                 uriFn: (Uri => Uri) = identity): HttpRequest =
-    HttpRequest(method).withHeaders(Host(requestHost())).withUri(uriFn(requestUri(s3Location)))
+    HttpRequest(method).withHeaders(Host(requestHost(s3Location.bucket))).withUri(uriFn(requestUri(s3Location)))
 
   def initiateMultipartUploadRequest(s3Location: S3Location,
                                      contentType: ContentType,
@@ -42,8 +42,8 @@ private[alpakka] object HttpRequests {
                method: HttpMethod = HttpMethods.GET,
                uriFn: (Uri => Uri) = identity): HttpRequest =
     HttpRequest(method)
-      .withHeaders(Host(requestHost(region)))
-      .withUri(uriFn(requestUri(s"/${s3Location.bucket}/${s3Location.key}", region, proxyTo)))
+      .withHeaders(Host(requestHost(s3Location.bucket)))
+      .withUri(uriFn(requestUri(s"/${s3Location.key}", s3Location.bucket, proxyTo)))
 
   def listBucket(s3Bucket: S3Bucket,
                  region: String,
@@ -52,7 +52,7 @@ private[alpakka] object HttpRequests {
                  maxKeys: Option[Int],
                  marker: Option[String]): HttpRequest =
     HttpRequest(HttpMethods.GET)
-      .withHeaders(Host(requestHost(region)))
+      .withHeaders(Host(requestHost(s3Bucket.bucket)))
       .withUri(listBucketUri(s3Bucket, region, proxyTo, prefix, maxKeys, marker))
 
   def uploadPartRequest(upload: MultipartUpload,
@@ -88,24 +88,21 @@ private[alpakka] object HttpRequests {
     }
   }
 
+  def requestHost(s3Bucket: String): Uri.Host = Uri.Host(s"${s3Bucket}.s3.amazonaws.com")
   //def requestHost(s3Location: S3Location): Uri.Host = Uri.Host(s"${s3Location.bucket}.s3.amazonaws.com")
-
-  def requestHost(region: String): Uri.Host = Uri.Host(s"s3-${region}.amazonaws.com")
-
-  def requestHost(): Uri.Host = Uri.Host("s3.amazonaws.com")
+  //def requestHost(region: String): Uri.Host = Uri.Host(s"s3-${region}.amazonaws.com")
+  //def requestHost(): Uri.Host = Uri.Host("s3.amazonaws.com")
 
   def requestUri(s3Location: S3Location): Uri =
-    Uri(s"/${s3Location.bucket}/${s3Location.key}").withHost(requestHost()).withScheme("https")
+    Uri(s"/${s3Location.key}").withHost(requestHost(s3Location.bucket)).withScheme("https")
 
-  def requestUri(path: String, region: String, proxyTo: Option[ProxyTo]): Uri =
+  def requestUri(path: String, bucket: String, proxyTo: Option[ProxyTo]): Uri =
     proxyTo match {
       case Some(proxyTo) =>
+        // redirect all traffic to a proxy
         Uri(path).withHost(proxyTo.host).withPort(proxyTo.port).withScheme("http")
       case _ =>
-        Uri(path)
-        // NOTE: not using bucket host addressing due to SSL certificate issue with periods in bucket names
-          .withHost(requestHost(region))
-          .withScheme("https")
+        Uri(path).withHost(requestHost(bucket)).withScheme("https")
     }
 
   def listBucketUri(s3Bucket: S3Bucket,
@@ -130,7 +127,6 @@ private[alpakka] object HttpRequests {
       case _ => Map[String, String]().empty
     }
 
-    requestUri(s"/${s3Bucket.bucket}", region, proxyTo)
-      .withQuery(Uri.Query(prefixQuery ++ markerQuery ++ maxKeysQuery))
+    requestUri(s"/", region, proxyTo).withQuery(Uri.Query(prefixQuery ++ markerQuery ++ maxKeysQuery))
   }
 }
