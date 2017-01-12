@@ -21,7 +21,6 @@ import akka.stream.alpakka.s3.auth.{ AWSCredentials, CredentialScope, Signer, Si
 import akka.stream.alpakka.s3.scaladsl.ProxyTo
 import akka.stream.scaladsl.{ Flow, Keep, Sink, Source }
 import akka.util.ByteString
-import com.typesafe.sslconfig.akka.AkkaSSLConfig
 
 import scala.collection.immutable.Seq
 import scala.concurrent.{ ExecutionContext, Future }
@@ -233,20 +232,8 @@ private[alpakka] final class S3Stream(credentials: AWSCredentials, region: Strin
 //      entityForSuccess(resp._1.get)
 //    }
 
-    // Need to implement custom hostname verification but unable to do so until ssl-config is fixed. issue https://github.com/typesafehub/ssl-config/issues/46
-    // The underlying issue is https certs fail on buckets that contain periods, and all our buckets contain periods.
-    // The AWS SDK works around this by specifying a less string host name verifier: http://grepcode.com/file/repo1.maven.org/maven2/com.ning/metrics.collector/2.0.0/org/apache/http/conn/ssl/AbstractVerifier.java
-    // This issue explained in aws docs http://docs.aws.amazon.com/AmazonS3/latest/dev/BucketRestrictions.html
-    // An alternative approach is to use path-style endpoints http://docs.aws.amazon.com/AmazonS3/latest/dev/RESTAPI.html but that likely involves tradeoffs (e.g. can't use CNAME records)
-    // For now disable host verification
-    // another potential solution is to add a cname record (e.g. x.mydomain.com bucket.name.s3.amazonaws.com)
-
-    val disableHostVerificationConfig =
-      AkkaSSLConfig().mapSettings(config => config.withLoose(config.loose.withDisableHostnameVerification(true)))
-    val httpConnectionContext = Http().createClientHttpsContext(disableHostVerificationConfig)
-
     for (req <- Signer.signedRequest(request, signingKey);
-         res <- Http().singleRequest(req, connectionContext = httpConnectionContext);
+         res <- Http().singleRequest(req);
          t <- entityForSuccess(res)) yield t
   }
 
